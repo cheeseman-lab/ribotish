@@ -1,4 +1,7 @@
-from ribotish.zbio import gtf, bam, ribo, stat, exp, tools, orf, fa, interval, io
+# Copyright (c) 2016 Peng Zhang <zhpn1024@163.com>
+# Modified 2026-10-06 by Matteo DiBernardo (Ribo-TISH Cheeseman lab fork, GPL-3.0):
+# working -p on Python >= 3.8 with ordered results (zbio/mp.py), cached background warning.
+from ribotish.zbio import gtf, bam, ribo, stat, exp, tools, orf, fa, interval, io, mp
 import math, time, itertools
 from os.path import isfile
 
@@ -124,7 +127,9 @@ def run(args):
   if len(args.tisbampaths) == 1 : 
     if args.inestpath is None : 
       path = args.tisbampaths[0] + '.bgest.txt'
-      if isfile(path) : args.inestpath = path
+      if isfile(path) : 
+        args.inestpath = path
+        print('WARNING: loading cached TIS background {} (loaded even if -e is given); pass -s FILE to choose a background, or remove/rename it to re-estimate'.format(path))
       elif args.estpath is None or args.estpath == '' : args.estpath = path
   if args.agenepath is None : args.agenepath = args.genepath
 
@@ -140,21 +145,8 @@ def run(args):
     print ("{} Estimating TIS background parameters...".format(time.ctime()))
     if args.verbose : print("TIS background estimation result will be saved to {}".format(args.estpath))
     if args.numProc > 1 : 
-      from multiprocessing import Process
-      import multiprocessing.pool
-      class NoDaemonProcess(Process):
-      # make 'daemon' attribute always return False
-        def _get_daemon(self):
-          return False
-        def _set_daemon(self, value):
-          pass
-        daemon = property(_get_daemon, _set_daemon)
-      class MyPool(multiprocessing.pool.Pool):
-        Process = NoDaemonProcess
-
-      pool = MyPool(1) # This is for memory efficiency
-      paras, slp, data = pool.apply(ribo.estimateTISbg, args=(args.agenepath, args.tisbampaths, args.genomefapath), kwds={'parts': parts, 'offdict': tisoffdict, 'alt_tis': alt, 'numProc': args.numProc, 'verbose': args.verbose, 'geneformat': args.geneformat, 'harrwidth': harrwidth, 'paired': paired})
-      pool.close()
+      # in a child process for memory efficiency; the child opens its own pool of numProc - 1
+      paras, slp, data = mp.run_in_child(ribo.estimateTISbg, args.agenepath, args.tisbampaths, args.genomefapath, parts = parts, offdict = tisoffdict, alt_tis = alt, numProc = args.numProc, verbose = args.verbose, geneformat = args.geneformat, harrwidth = harrwidth, paired = paired)
     else : 
       paras, slp, data = ribo.estimateTISbg(args.agenepath, args.tisbampaths, args.genomefapath, parts = parts, offdict = tisoffdict, alt_tis=alt, numProc = 1, verbose = verbose, geneformat = args.geneformat, harrwidth = harrwidth, paired = paired)
     estfile = open(args.estpath, 'w')
@@ -177,8 +169,7 @@ def run(args):
       transprofile = args.inprofile
 
   if args.numProc > 1 : 
-    from multiprocessing import Pool
-    pool = Pool(processes = args.numProc - 1) 
+    pool = mp.pool(args.numProc - 1)
 
   cds_regions = {}
   known_tis = {}
@@ -229,7 +220,7 @@ def run(args):
   else : 
     #from multiprocessing import Pool
     #pool = Pool(processes = args.numProc - 1)
-    pred_iter = pool.imap_unordered(_pred_gene, para_iter, chunksize = 5)
+    pred_iter = pool.imap(_pred_gene, para_iter, chunksize = 5)
   if transprofile is not None : 
     tpfile = open(transprofile, 'w')
     tpfile.write('Gid\tTid\tSymbol\tTISProf\tRiboProf\n')
@@ -254,6 +245,9 @@ def run(args):
     #for t in g.trans : 
       tis = t.cds_start(cdna = False)
       if tis is not None : known_tis[t.chr][t.strand][tis] = 1
+  if args.numProc > 1 : 
+    pool.close()
+    pool.join()
 
   for chr in cds_regions :
     for strand in cds_regions[chr] :

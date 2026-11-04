@@ -1,3 +1,9 @@
+2026-10-06 ribotish 0.2.8+cheeseman.1
+
+	0.2.8+cheeseman.1: working -p on Python >= 3.8, deterministic output order, cached background warning
+
+	0.2.8+cheeseman.1: exact speedups (byte-identical output): memoized frame rank-sum test keyed on count dicts, cached log-factorials in combination_log, C counting in countDict, sliced frame_test arrays, cached BAM reference names, integer-measure read/transcript compatibility
+
 2025-10-21 ribotish 0.2.8
 
 	Add transplot module to plot RPF profiles in a transcript.

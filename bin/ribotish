@@ -5,8 +5,10 @@ Copyright (c) 2016 Peng Zhang <zhpn1024@163.com>
 This code is free software; you can redistribute it and/or modify it
 under the terms of the BSD License (see the file COPYING included with
 the distribution).
+Modified 2026-10-06 by Matteo DiBernardo (Ribo-TISH Cheeseman lab fork, GPL-3.0): version string
+0.2.8+cheeseman.1; see CHANGELOG.
 @status: Beta
-@version: 0.2.7
+@version: 0.2.8+cheeseman.1
 @author:  Peng Zhang
 @contact: zhpn1024@163.com
 """

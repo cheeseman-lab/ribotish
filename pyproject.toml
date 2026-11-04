@@ -1,0 +1,15 @@
+[build-system]
+requires = ["setuptools>=61", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.ruff]
+line-length = 100
+
+[tool.ruff.format]
+# Upstream code (and the fork module src/zbio/mp.py) keeps upstream 2-space style.
+exclude = ["src/**", "setup.py"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["tests"]
+markers = ["slow: long-running chr22 equivalence tests"]

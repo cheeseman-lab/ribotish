@@ -1,10 +1,12 @@
 '''
 Main library for riboseq analysis in zbio/ribotish
 Copyright (c) 2016 Peng Zhang <zhpn1024@163.com>
+Modified 2026-10-06 by Matteo DiBernardo (Ribo-TISH Cheeseman lab fork, GPL-3.0):
+ordered non-daemonic pools, memoized frame rank-sum test, sliced frame_test (exact).
 '''
 import itertools, math
 from . import stat, bam, gtf, exp, orf, tools, io, fa, interval
-from multiprocessing import Pool
+from . import mp
 
 codonSize = 3
 maxNH = 5
@@ -46,9 +48,30 @@ def rstest_mw(x, y):
 def rstest(x, y, delta = 1e-4, show = False): 
   '''Exact rank sum test for intergers with ties
   '''
+  if show : return _rstest(x, y, delta, show)
+  # dict equality treats 1, 1.0, True and numpy ints as one key; safe because counts are ints
+  key = tuple(stat.countDict(x).items()), tuple(stat.countDict(y).items()), delta
+  size = len(key[0]) + len(key[1])
+  if size > _rstestKeyMax : return _rstest(x, y, delta, show) # large keys rarely repeat
+  p = _rstestCache.get(key)
+  if p is None :
+    global _rstestCacheItems
+    p = _rstest(x, y, delta, show)
+    if len(_rstestCache) >= _rstestCacheMax or _rstestCacheItems + size > _rstestItemsMax :
+      _rstestCache.clear()
+      _rstestCacheItems = 0
+    _rstestCache[key] = p
+    _rstestCacheItems += size
+  return p
+def _rstest(x, y, delta, show):
   rs =  stat.rankSumTiesExact(x, y, show = show)
   p = rs.test(delta=delta)
   return p
+_rstestCache = {} # rstest only depends on the ordered count dicts of x and y
+_rstestCacheMax = 1 << 16 # max cached entries
+_rstestKeyMax = 256 # keys with more distinct (value, count) items in x and y are not cached
+_rstestItemsMax = 1 << 19 # max total key items held (~50 MB per process); cache cleared when full
+_rstestCacheItems = 0
 class Ribo: 
   '''riboseq profile for a transcript
   '''
@@ -106,13 +129,20 @@ class Ribo:
     start and stop should be in frame
     '''
     l = (stop - start) // 3
-    inarr = [0] * l
-    outarr = 2 * l * [0]
-    for i in range(l):
-      p = start + i * 3
-      inarr[i] = self.cnts[p]
-      outarr[i*2] = self.cnts[p + 1]
-      outarr[i*2 + 1] = self.cnts[p + 2]
+    if l > 0 and start >= 0 and start + l * 3 <= len(self.cnts) : # same lists, built by slicing
+      e = start + l * 3
+      inarr = self.cnts[start:e:3]
+      outarr = 2 * l * [0]
+      outarr[0::2] = self.cnts[start+1:e:3]
+      outarr[1::2] = self.cnts[start+2:e:3]
+    else :
+      inarr = [0] * l
+      outarr = 2 * l * [0]
+      for i in range(l):
+        p = start + i * 3
+        inarr[i] = self.cnts[p]
+        outarr[i*2] = self.cnts[p + 1]
+        outarr[i*2 + 1] = self.cnts[p + 2]
     if len(inarr) <= 0 or len(outarr) <= 0 : return 1
     if max(inarr) == 0 : return 1
     if glm : return stat.glmNBTest(inarr, outarr)
@@ -437,8 +467,8 @@ def estimate_tis_bg_all(gtfpath, bampath, genomefapath, parts = [0.25, 0.5, 0.75
   para_iter = izip(gene_iter, itertools.repeat(bampath), itertools.repeat(offdict))
   if numProc <= 1 : merge_iter = imap(_merge_cnts, para_iter)
   else : 
-    pool = Pool(processes = numProc - 1)
-    merge_iter = pool.imap_unordered(_merge_cnts, para_iter, chunksize = 100)
+    pool = mp.pool(numProc - 1)
+    merge_iter = pool.imap(_merge_cnts, para_iter, chunksize = 100)
     
   for result in merge_iter:
     if result is None : continue
@@ -476,6 +506,7 @@ def estimate_tis_bg_all(gtfpath, bampath, genomefapath, parts = [0.25, 0.5, 0.75
   else : 
     paras = list(pool.map(_est_ztnb, [(da, maxqt) for da in data]))
     pool.close()
+    pool.join()
   return paras, slp, data
 
 def multiRibo(trans, bampaths, offset = offset, offdict = None, compatible = True, mis = 2, paired = False): 
@@ -568,8 +599,8 @@ def estimate_tis_bg_inframe(genepath, bampaths, genomefapath, parts = [0.25, 0.5
   para_iter = izip(gene_iter, itertools.repeat(bampaths), itertools.repeat(offdict))
   if numProc <= 1 : merge_iter = imap(_merge_cnts_cds, para_iter)
   else : 
-    pool = Pool(processes = numProc - 1)
-    merge_iter = pool.imap_unordered(_merge_cnts_cds, para_iter, chunksize = 20)
+    pool = mp.pool(numProc - 1)
+    merge_iter = pool.imap(_merge_cnts_cds, para_iter, chunksize = 20)
   ctotal = 0
   for result in merge_iter:
     if result is None : continue
@@ -606,6 +637,7 @@ def estimate_tis_bg_inframe(genepath, bampaths, genomefapath, parts = [0.25, 0.5
   else : 
     paras = list(pool.map(_est_nb, data)) #[(da, maxqt) for da in data])
     pool.close()
+    pool.join()
   return paras, slp, data
 
 def _cdsCounts(args): # updated for bampath list
@@ -650,8 +682,8 @@ def estimateTISbg(genepath, bampaths, genomefapath, parts = [0.25, 0.5, 0.75], o
   para_iter = izip(trans_iter, itertools.repeat(args2)) # , itertools.repeat(offdict))
   if numProc <= 1 : merge_iter = imap(_cdsCounts, para_iter)
   else : 
-    pool = Pool(processes = numProc - 1)
-    merge_iter = pool.imap_unordered(_cdsCounts, para_iter, chunksize = 5)
+    pool = mp.pool(numProc - 1)
+    merge_iter = pool.imap(_cdsCounts, para_iter, chunksize = 5)
   ctotal = 0
   for result in merge_iter:
     if result is None : continue
@@ -662,6 +694,7 @@ def estimateTISbg(genepath, bampaths, genomefapath, parts = [0.25, 0.5, 0.75], o
     genes.append(t)
   if len(sl) < len(parts):
     print('Too few TIS background samples! Known CDS annotation should be provided. See `-a` option')
+    if numProc > 1 : pool.terminate()
     exit(1)
   sl.sort()
   if verbose : print ('Group data...')
@@ -689,6 +722,7 @@ def estimateTISbg(genepath, bampaths, genomefapath, parts = [0.25, 0.5, 0.75], o
   else : 
     paras = list(pool.map(_est_nb, data)) #[(da, maxqt) for da in data])
     pool.close()
+    pool.join()
   return paras, slp, data
 
 
@@ -723,8 +757,8 @@ def estimate_tis_bg(gtfpath, bampath, genomefapath, parts = [0.25, 0.5, 0.75], o
   para_iter = izip(gene_iter, itertools.repeat(bampath), itertools.repeat(offdict))
   if numProc <= 1 : merge_iter = imap(_max_cnts, para_iter)
   else : 
-    pool = Pool(processes = numProc - 1)
-    merge_iter = pool.imap_unordered(_max_cnts, para_iter, chunksize = 20)
+    pool = mp.pool(numProc - 1)
+    merge_iter = pool.imap(_max_cnts, para_iter, chunksize = 20)
   total = 0
   for result in merge_iter:
     if result is None : continue
@@ -762,6 +796,7 @@ def estimate_tis_bg(gtfpath, bampath, genomefapath, parts = [0.25, 0.5, 0.75], o
   else : 
     paras = list(pool.map(_est_nb, data)) #[(da, maxqt) for da in data])
     pool.close()
+    pool.join()
   return paras, slp, data
 
 def frame_bias(arr): # ['0', '1', '2', '01', '02', '12', '012']
@@ -974,14 +1009,16 @@ def lendis(genepath, bampath, lens = [25,35], dis = [-40,20], ccds = False, minR
   para_iter = izip(trans_iter, rep(bampath), rep(lens), rep(dis), rep(ccds), rep(minR), rep(m0), rep(cdsBins), rep(paired))
   if numProc <= 1 : len_iter = imap(_lendis_trans, para_iter) #_lendis_gene
   else : 
-    pool = Pool(processes = numProc - 1)
-    len_iter = pool.imap_unordered(_lendis_trans, para_iter, chunksize = 20) #_lendis_gene
+    pool = mp.pool(numProc - 1)
+    len_iter = pool.imap(_lendis_trans, para_iter, chunksize = 20) #_lendis_gene
     
   for result in len_iter:
     if result is None : continue
     ad.merge(result[0])
     if m0 : adm.merge(result[1])
-  if numProc > 1 : pool.close()
+  if numProc > 1 : 
+    pool.close()
+    pool.join()
   results = [ad]
   if m0 : results += [adm]
   return results

@@ -1,9 +1,12 @@
 '''
 Statistics tools
 Copyright (c) 2016 Peng Zhang <zhpn1024@163.com>
+Modified 2026-10-06 by Matteo DiBernardo (Ribo-TISH Cheeseman lab fork, GPL-3.0):
+log-factorial table in combination_log, Counter-based countDict (exact).
 '''
 
 import math
+from collections import Counter
 from scipy.stats import nbinom, chisquare # chisqprob
 from scipy.stats import chi2
 from scipy.special import betaln, betainc, gammaln
@@ -11,6 +14,10 @@ logarr = [None] # log(N)
 logsumarr = [0] # log(N!)
 def logsum(n): # log(N!)
   return gammaln(n+1)
+_lfact = [] # _lfact[i] is logsum(i), filled on demand
+_lfactMax = 1 << 16 # bound on cached entries
+def _lfact_ext(n): # assumes one thread per process (ribotish uses processes); concurrent appends would shift indices
+  for i in range(len(_lfact), n + 1): _lfact.append(logsum(i))
 def logarr_ext(n) : #, logarr = logarr, logsumarr = logsumarr): # prepare log values
   global logarr, logsumarr
   l = len(logarr)
@@ -63,6 +70,9 @@ def combination_log(n, k, show = False):
   if n < 0 : return None
   if k > n or k < 0: return None #None is log(0)
   #logarr_ext(n)
+  if n < _lfactMax : # same gammaln values, looked up instead of recomputed
+    if n >= len(_lfact) : _lfact_ext(n)
+    return _lfact[n] - _lfact[k] - _lfact[n-k]
   lpr = logsum(n) - logsum(k) - logsum(n-k) # logsumarr[n] - logsumarr[k] - logsumarr[n-k]
   return lpr
 
@@ -934,11 +944,7 @@ class rankSumTiesExact:
 def countDict(arr):
   '''count array to dict
   '''
-  data = {}
-  for d in arr:
-    if d not in data : data[d] = 0
-    data[d] += 1
-  return data
+  return dict(Counter(arr)) # same keys, counts and insertion order
 def rankDict(data):
   '''count array to rank dict
   '''

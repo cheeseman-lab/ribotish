@@ -9,8 +9,11 @@
 # under the terms of the BSD License (see the file COPYING included with
 # the distribution).
 # 
+# Modified 2026-10-06 by Matteo DiBernardo (Ribo-TISH Cheeseman lab fork, GPL-3.0):
+# version 0.2.8+cheeseman.1 and repo path on sys.path; see CHANGELOG.
+# 
 # @status:  Beta
-# @version: 0.2.8
+# @version: 0.2.8+cheeseman.1
 # @author:  Peng Zhang
 # @contact: zhpn1024@163.com
 
@@ -46,6 +49,7 @@ if __name__ == '__main__':
     with open("README.rst",'r') as fh:
         long_description = fh.read()
     # version
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     from src import __version__ as VERSION
     PROG = 'ribotish'
     #with open('RELEASE','r') as fh:

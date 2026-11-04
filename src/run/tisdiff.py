@@ -1,3 +1,6 @@
+# Copyright (c) 2016 Peng Zhang <zhpn1024@163.com>
+# Modified 2026-10-06 by Matteo DiBernardo (Ribo-TISH Cheeseman lab fork, GPL-3.0):
+# non-daemonic process pool (zbio/mp.py).
 from ribotish.zbio import gtf, bam, ribo, stat, exp, tools, orf, fa, interval, io
 import math, time, itertools, sys
 from os.path import isfile
@@ -227,8 +230,8 @@ def run(args):
   para_iter = transPara(trans_iter, trans_for_bam)
   if args.numProc <= 1 : pred_iter = imap(_get_tis, para_iter)
   else : 
-    from multiprocessing import Pool
-    pool = Pool(processes = args.numProc - 1)
+    from ribotish.zbio import mp
+    pool = mp.pool(args.numProc - 1)
     pred_iter = pool.imap_unordered(_get_tis, para_iter, chunksize = 5)
   for result in pred_iter: 
     tid, pos_cnt = result # r1, r2 = result

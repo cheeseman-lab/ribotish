@@ -1,6 +1,8 @@
 '''
 Intervals processing
 Copyright (c) 2016 Peng Zhang <zhpn1024@163.com>
+Modified 2026-10-06 by Matteo DiBernardo (Ribo-TISH Cheeseman lab fork, GPL-3.0):
+integer splice-compatibility helpers (exact).
 '''
 
 def is_overlap(i1, i2):
@@ -342,3 +344,43 @@ def str2interval(s, blocksep = ',', rangesep = '-', id = ''):
   return Interval(itvs=itvs, id=id)
 
 
+
+def blocks_compatible(blocks, other, mis = 0):
+  '''same result as Interval(itvs = blocks).is_compatible(other, mis = mis), computed by
+  integer interval measure. Falls back to that call unless blocks are non-empty, non-degenerate
+  and sorted without overlap, and other.lst is sorted without overlap (normalized by check()).
+  '''
+  ps, pe = None, None
+  for s, e in blocks :
+    if s >= e or (pe is not None and s < pe) : ps = None; break
+    if ps is None : ps = s
+    pe = e
+  olst = other.lst
+  if ps is not None :
+    oe = None
+    for s, e in olst :
+      if s > e or (oe is not None and s < oe) : ps = None; break
+      oe = e
+  if ps is None or len(olst) == 0 : return Interval(itvs = blocks).is_compatible(other, mis = mis)
+  p1 = max(ps, olst[0][0])
+  p2 = min(pe, olst[-1][1])
+  if p2 - p1 <= mis : return True # not overlap
+  sl, ol = [], []
+  for s, e in blocks :
+    if s < p1 : s = p1
+    if e > p2 : e = p2
+    if s < e : sl.append((s, e))
+  for s, e in olst :
+    if s < p1 : s = p1
+    if e > p2 : e = p2
+    if s < e : ol.append((s, e))
+  m = 0
+  for s, e in sl : m += e - s
+  for s, e in ol : m += e - s
+  i = j = 0
+  while i < len(sl) and j < len(ol) :
+    s, e = max(sl[i][0], ol[j][0]), min(sl[i][1], ol[j][1])
+    if s < e : m -= 2 * (e - s)
+    if sl[i][1] < ol[j][1] : i += 1
+    else : j += 1
+  return m <= mis

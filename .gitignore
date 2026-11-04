@@ -8,3 +8,8 @@ dist/*
 *.pdf
 ._*
 *.bkp
+
+work/
+.venv*/
+*.egg-info/
+__pycache__/

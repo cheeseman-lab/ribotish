@@ -1,6 +1,8 @@
 '''
 Bam file and reads processing
 Copyright (c) 2016 Peng Zhang <zhpn1024@163.com>
+Modified 2026-10-06 by Matteo DiBernardo (Ribo-TISH Cheeseman lab fork, GPL-3.0):
+cached BAM header tuples, integer read/transcript compatibility check (exact).
 '''
 import pysam
 from . import interval
@@ -84,12 +86,21 @@ class Bamfile(pysam.Samfile):
         read = self.mate(r2[id])
         yield Bam(read, self, read2 = r2[id])
 
+def _reflens(bamfile):
+  '''references and lengths of a bam file, cached on the file object when possible
+  '''
+  try : return bamfile._reflens
+  except AttributeError : pass
+  rl = bamfile.references, bamfile.lengths
+  try : bamfile._reflens = rl
+  except AttributeError : pass
+  return rl
+
 class Bam():#AlignedRead
   
   def __init__(self, read, bamfile, read2 = None):
     self.read = read
-    self.ref = bamfile.references
-    self.lens = bamfile.lengths
+    self.ref, self.lens = _reflens(bamfile)
     self.read2 = read2
   #def __getattr__(self,attr):
     #a=getattr(self,attr)
@@ -522,9 +533,10 @@ class BamLoad:
     self.regions = transRegions
     #if verbose : print('Loading reads...')
     #import itertools
-    if numProc >= 1 and pool is None :
-      from multiprocessing import Pool
-      pool = Pool(processes = numProc)
+    ownpool = numProc >= 1 and pool is None
+    if ownpool :
+      from . import mp
+      pool = mp.pool(numProc)
     if self.regions is not None :
       paras = [(bampath, chr, self.regions[chr], '.', posFunc, maxNH, minMapQ, secondary) for chr in self.regions]
       #for chr in self.regions:
@@ -536,6 +548,9 @@ class BamLoad:
     #else : 
       #load_iter = pool.imap_unordered(getBamLoadChr, paras, chunksize = 1)
     loads = pool.map(getBamLoadChr, paras, chunksize = 1)
+    if ownpool :
+      pool.close()
+      pool.join()
     #results = []
     #if self.regions is not None :
       #for chr in self.regions :
@@ -633,8 +648,7 @@ class BamLoadChr:
     '''if compatible with given transcript, allow some (mis) incompatible bases
     '''
     for blocks in key : 
-      ri = interval.Interval(itvs = blocks)
-      if not ri.is_compatible(transitv, mis = mis) : return False
+      if not interval.blocks_compatible(blocks, transitv, mis = mis) : return False
     return True
   def _compatible0(self, key, transitv, mis = 2): # key structure changed
     
