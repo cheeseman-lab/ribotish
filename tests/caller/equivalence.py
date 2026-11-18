@@ -8,14 +8,30 @@ from pathlib import Path
 OUTPUTS = ("out.txt", "out_all.txt", "bg.txt")
 
 
+def load_fixture(fixture_dir):
+    """TIS BAMs, CHX BAMs, GTF and FASTA of a fixture directory.
+
+    A fixture lists its BAMs in fixture.tsv (role, bam) and uses ../region.gtf and ../region.fa
+    (scripts/make_fixture.py). A directory without fixture.tsv has the local chr22 layout:
+    72?_*.bam, chr22.gtf and chr22.fa.
+    """
+    d = Path(fixture_dir).resolve()
+    if (d / "fixture.tsv").exists():
+        rows = [ln.split("\t") for ln in (d / "fixture.tsv").read_text().splitlines()[1:] if ln]
+        tis = [d / b for role, b in rows if role == "tis"]
+        chx = [d / b for role, b in rows if role == "chx"]
+        return tis, chx, d.parent / "region.gtf", d.parent / "region.fa"
+    bams = {p.name[:3]: p for p in sorted(d.glob("72?_*.bam"))}
+    return [bams["727"], bams["729"]], [bams["726"], bams["728"]], d / "chr22.gtf", d / "chr22.fa"
+
+
 def run_predict(ribotish_bin, fixture_dir, out_dir, nproc):
     """Run `ribotish predict` on a fixture dir; return out_dir."""
-    fixture_dir = Path(fixture_dir).resolve()
     out_dir = Path(out_dir).resolve()
     out_dir.mkdir(parents=True, exist_ok=True)
-    bams = {p.name[:3]: p for p in sorted(fixture_dir.glob("72?_*.bam"))}
-    tis = ",".join(str(bams[k]) for k in ("727", "729"))
-    chx = ",".join(str(bams[k]) for k in ("726", "728"))
+    tis_bams, chx_bams, gtf, fa = load_fixture(fixture_dir)
+    tis = ",".join(map(str, tis_bams))
+    chx = ",".join(map(str, chx_bams))
     cmd = [
         str(ribotish_bin),
         "predict",
@@ -24,9 +40,9 @@ def run_predict(ribotish_bin, fixture_dir, out_dir, nproc):
         "-b",
         chx,
         "-g",
-        str(fixture_dir / "chr22.gtf"),
+        str(gtf),
         "-f",
-        str(fixture_dir / "chr22.fa"),
+        str(fa),
         "-o",
         str(out_dir / "out.txt"),
         "-e",
@@ -49,7 +65,8 @@ def run_predict(ribotish_bin, fixture_dir, out_dir, nproc):
 
 def _stamp(upstream_bin, fixture_dir):
     h = hashlib.sha256()
-    for p in sorted(Path(fixture_dir).iterdir()):
+    _, _, gtf, fa = load_fixture(fixture_dir)
+    for p in [*sorted(Path(fixture_dir).iterdir()), gtf, fa]:
         st = p.stat()  # follows symlinks (chr22.fa)
         h.update(f"{p.name}:{st.st_size}:{int(st.st_mtime)}\n".encode())
     ver = subprocess.run([str(upstream_bin), "--version"], capture_output=True, text=True)

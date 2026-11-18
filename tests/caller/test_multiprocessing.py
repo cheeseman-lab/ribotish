@@ -6,13 +6,9 @@ from pathlib import Path
 
 import pytest
 
-from equivalence import cached_reference
+from equivalence import cached_reference, load_fixture
 
 TIMEOUT = 900  # a hang (lost pool result, zombie worker) fails instead of blocking the suite
-
-
-def _bams(fixture_dir):
-    return {p.name[:3]: p for p in sorted(Path(fixture_dir).glob("72?_*.bam"))}
 
 
 def _predict(fork_bin, out_dir, tis, chx, gtf, fa, nproc, extra=()):
@@ -46,7 +42,7 @@ def _predict(fork_bin, out_dir, tis, chx, gtf, fa, nproc, extra=()):
 def _small_gtf(mini_dir, dest, ngenes, genes=None):
     """First `ngenes` genes of the mini GTF, or of `genes` if given (fewer genes than workers)."""
     keep, out = set(), []
-    for line in (Path(mini_dir) / "chr22.gtf").read_text().splitlines(keepends=True):
+    for line in load_fixture(mini_dir)[2].read_text().splitlines(keepends=True):
         if line.startswith("#") or 'gene_id "' not in line:
             continue
         gid = line.split('gene_id "', 1)[1].split('"', 1)[0]
@@ -70,9 +66,8 @@ def test_more_workers_than_genes(fork_bin, upstream_bin, mini_dir, ref_root, tmp
     bg = cached_reference(upstream_bin, mini_dir, ref_root) / "bg.txt"
     called = _called_genes(bg.parent / "out.txt")[:3]
     gtf = _small_gtf(mini_dir, tmp_path / "small.gtf", 3, set(called))
-    b = _bams(mini_dir)
-    tis, chx = [b["727"], b["729"]], [b["726"], b["728"]]
-    fa, extra = mini_dir / "chr22.fa", ["-s", str(bg)]
+    tis, chx, _, fa = load_fixture(mini_dir)
+    extra = ["-s", str(bg)]
     ref = tmp_path / "upstream_p1"
     rc, log = _predict(upstream_bin, ref, tis, chx, gtf, fa, 1, extra)
     assert rc == 0, log[-2000:]
@@ -90,14 +85,14 @@ def test_more_workers_than_genes(fork_bin, upstream_bin, mini_dir, ref_root, tmp
 def test_too_few_background_samples_exits(fork_bin, mini_dir, tmp_path, nproc):
     # Background estimation calls exit(1) inside the child process when -p > 1; must not hang.
     gtf = _small_gtf(mini_dir, tmp_path / "small.gtf", 3)
-    b = _bams(mini_dir)
+    tis, chx, _, fa = load_fixture(mini_dir)
     rc, log = _predict(
         fork_bin,
         tmp_path / "out",
-        [b["727"], b["729"]],
-        [b["726"], b["728"]],
+        tis,
+        chx,
         gtf,
-        mini_dir / "chr22.fa",
+        fa,
         nproc,
         ["-e", str(tmp_path / "out" / "bg.txt")],
     )
@@ -107,7 +102,8 @@ def test_too_few_background_samples_exits(fork_bin, mini_dir, tmp_path, nproc):
 
 def test_cached_background_warning(fork_bin, upstream_bin, mini_dir, ref_root, tmp_path):
     bg = cached_reference(upstream_bin, mini_dir, ref_root) / "bg.txt"
-    src = _bams(mini_dir)["727"]
+    tis_bams, chx_bams, gtf, fa = load_fixture(mini_dir)
+    src = tis_bams[0]
     data = tmp_path / "data"
     data.mkdir()
     for suffix in ("", ".bai", ".para.py"):
@@ -115,8 +111,7 @@ def test_cached_background_warning(fork_bin, upstream_bin, mini_dir, ref_root, t
     tis = data / src.name
     cached = Path(str(tis) + ".bgest.txt")
     shutil.copyfile(bg, cached)
-    chx = [_bams(mini_dir)["726"]]
-    gtf, fa = mini_dir / "chr22.gtf", mini_dir / "chr22.fa"
+    chx = [chx_bams[0]]
 
     rc, log = _predict(fork_bin, tmp_path / "implicit", [tis], chx, gtf, fa, 2)
     assert rc == 0, log[-2000:]

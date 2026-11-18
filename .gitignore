@@ -13,3 +13,4 @@ work/
 .venv*/
 *.egg-info/
 __pycache__/
+tmp/

@@ -42,19 +42,27 @@ def upstream_bin():
     return str(b)
 
 
+DATA = ROOT / "tests" / "data" / "chr22_19M"
+FIXTURES = ("u2os", "chen2020_ipsc")
+
+
+@pytest.fixture(scope="session", params=FIXTURES)
+def fixture_dir(request):
+    """Each committed fixture: chr22:19,000,000-21,000,000 (tests/data/README.md)."""
+    return DATA / request.param
+
+
 @pytest.fixture(scope="session")
 def mini_dir():
-    d = WORK / "mini"
-    if not (d / "chr22.gtf").exists():
-        _missing("mini fixture absent (run scripts/make_mini_fixture.sh)")
-    return d
+    """The fixture used by the edge-case tests."""
+    return DATA / "u2os"
 
 
 @pytest.fixture(scope="session")
 def chr22_dir():
     d = WORK / "chr22"
     if not (d / "chr22.gtf").exists():
-        _missing("work/chr22 fixture absent")
+        pytest.skip("work/chr22 (whole chr22, local only) absent")
     return d
 
 
